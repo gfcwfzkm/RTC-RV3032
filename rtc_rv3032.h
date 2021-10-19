@@ -1,3 +1,11 @@
+/**
+ * RV-3032-C7 Library
+ * 
+ * Basic library for the swiss real-time-clock RV-3032-C7. The chip has a ton of features but the ones
+ * needed for basic rtc functionality are programmed. More advanced features of the chip like the timer,
+ * event interrupt system and such are left unimplemented (yet) 
+ */
+
 
 #ifndef _RTC_RV3032_H_
 #define _RTC_RV3032_H_
@@ -159,7 +167,9 @@ enum RV3032_CLKOUT{
 	RV3032_HF_MODE
 };
 
-uint8_t rv3032_init(RV3032_t *rtc, uint8_t (*startTrans)(void*), uint8_t (*sendBytes)(void*,uint8_t,uint8_t*,uint16_t),uint8_t (*getBytes)(void*,uint8_t,uint8_t*,uint16_t),uint8_t (*endTrans)(void*));
+void rv3032_initStruct(uint8_t (*startTrans)(void*), uint8_t (*sendBytes)(void*,uint8_t,uint8_t*,uint16_t),uint8_t (*getBytes)(void*,uint8_t,uint8_t*,uint16_t),uint8_t (*endTrans)(void*));
+
+uint8_t rv3032_init(RV3032_t *rtc);
 
 void rv3032_writeReg(RV3032_t *rtc, uint8_t reg_addr, uint8_t reg_val);
 
