@@ -143,5 +143,32 @@ float rv3032_getTemperature(RV3032_t *rtc)
 
 void rv3032_configureClockOut(RV3032_t *rtc, enum RV3032_CLKOUT clockOut, uint16_t hfClock_steps, enum RV3032_EEPROM_OPTION eeOption)
 {
+	uint8_t dataPackage;
 
+	rtc->errors = RV3032_NO_ERRORS;
+
+	switch(clockOut)
+	{
+		case RV3032_DISABLE_CLKOUT:
+
+			break;
+		case RV3032_XTAL_32KHZ_OUT:
+
+			break;
+		case RV3032_XTAL_1024HZ_OUT:
+
+			break;
+		case RV3032_XTAL_64HZ_OUT:
+
+			break;
+		case RV3032_XTAL_1HZ_OUT:
+
+			break;
+		case RV3032_HF_MODE:
+
+			break;
+		default:
+
+			break;
+	}
 }
