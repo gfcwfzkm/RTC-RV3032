@@ -118,12 +118,43 @@
 #define R_RV3032_EE_ADDRESS		0x3D
 #define R_RV3032_EE_DATA		0x3E
 #define R_RV3032_EE_COMMAND		0x3F
+#define R_RV3032_EE_COMMAND_UPDATE	0x11
+#define R_RV3032_EE_COMMAND_REFRESH	0x12
+#define R_RV3032_EE_COMMAND_WRITE	0x21
+#define R_RV3032_EE_COMMAND_READ	0x22
 #define R_RV3032_USER_RAM_START	0x40
 #define R_RV3032_USER_RAM_END	0x4F
 
+#define E_RV3032_PMU			0xC0
+#define E_RV3032_PMU_NCLKE			0x40
+#define E_RV3032_PMU_BSM_1			0x20
+#define E_RV3032_PMU_BSM_0			0x10
+#define E_RV3032_PMU_TCR_1			0x08
+#define E_RV3032_PMU_TCR_0			0x04
+#define E_RV3032_PMU_TCM_1			0x02
+#define E_RV3032_PMU_TCM_0			0x01
+#define E_RV3032_OFFET			0xC1
+#define E_RV3032_OFFET_PORIE		0x80
+#define E_RV3032_OFFET_VLIE			0x40
+#define E_RV3032_CLKOUT1		0xC2
+#define E_RV3032_CLKOUT2		0xC3
+#define E_RV3032_CLKOUT2_OS			0x80
+#define E_RV3032_CLKOUT2_FD_1		0x40
+#define E_RV3032_CLKOUT2_FD_0		0x20
+#define E_RV3032_TREFERENCE0	0xC4
+#define E_RV3032_TREFERENCE1	0xC5
+#define E_RV3032_PASSWORD0		0xC6
+#define E_RV3032_PASSWORD1		0xC7
+#define E_RV3032_PASSWORD2		0xC8
+#define E_RV3032_PASSWORD3		0xC9
+#define E_RV3032_EEPWE			0xCA
+#define E_RV3032_USER_EEPROM_START	0xCB
+#define E_RV3032_USER_EEPROM_END	0xEA
+
 enum RV3032_ERROR{
 	RV3032_NO_ERRORS	= 0,
-	RV3032_IOERRORS		= 1
+	RV3032_IOERRORS,
+	RV3032_EEPROM_ERROR,
 };
 
 typedef struct {
@@ -139,6 +170,7 @@ typedef struct {
 						uint8_t*,		// Pointer to the buffer to receive
 						uint16_t);		// length of the buffer
 	uint8_t (*endTransaction)(void*);	// Finish the transaction & release the IO / Peripheral
+	void (*wait1ms)(void);				// Function pointer to perform a 1 millisecond delay
 }RV3032_t;
 
 typedef struct {
@@ -152,22 +184,36 @@ typedef struct {
 	uint8_t year;
 }RV3032_TIME_t;
 
-enum RV3032_EEPROM_OPTION{
-	RV3032_EEPROM_SAFE_SETTINGS,
-	RV3032_NO_EEPROM_SAVING,
-	RV3032_NO_EEPROM_DISABLE_REFRESH
-};
-
 enum RV3032_CLKOUT{
-	RV3032_DISABLE_CLKOUT,
-	RV3032_XTAL_32KHZ_OUT,
-	RV3032_XTAL_1024HZ_OUT,
-	RV3032_XTAL_64HZ_OUT,
-	RV3032_XTAL_1HZ_OUT,
-	RV3032_HF_MODE
+	RV3032_DISABLE_CLKOUT 	= 0xFF,
+	RV3032_XTAL_32KHZ_OUT 	= 0,
+	RV3032_XTAL_1024HZ_OUT 	= E_RV3032_CLKOUT2_FD_0,
+	RV3032_XTAL_64HZ_OUT 	= E_RV3032_CLKOUT2_FD_1,
+	RV3032_XTAL_1HZ_OUT 	= E_RV3032_CLKOUT2_FD_0 | E_RV3032_CLKOUT2_FD_1,
+	RV3032_HF_MODE 			= E_RV3032_CLKOUT2_OS
 };
 
-void rv3032_initStruct(RV3032_t *rtc, void *ioInterface, uint8_t (*startTrans)(void*), uint8_t (*sendBytes)(void*,uint8_t,uint8_t*,uint16_t),uint8_t (*getBytes)(void*,uint8_t,uint8_t*,uint16_t),uint8_t (*endTrans)(void*));
+enum RV3032_BSM{
+	RV3032_BSM_DISABLED 	= 0,
+	RV3032_BSM_DIRECT 		= E_RV3032_PMU_BSM_0,
+	RV3032_BSM_LEVEL 		= E_RV3032_PMU_BSM_1
+};
+
+enum RV3032_TCR{
+	RV3032_TCR_1kOhm 		= 0,
+	RV3032_TCR_2kOhm 		= E_RV3032_PMU_TCR_0,
+	RV3032_TCR_7kOhm 		= E_RV3032_PMU_TCR_1,
+	RV3032_TCR_11kOhm 		= E_RV3032_PMU_TCR_0 | E_RV3032_PMU_TCR_1
+};
+
+enum RV3032_TCM{
+	RV3032_TCM_OFF 			= 0,
+	RV3032_TCM_175 			= E_RV3032_PMU_TCM_0,
+	RV3032_TCM_3 			= E_RV3032_PMU_TCM_1,
+	RV3032_TCM_44 			= E_RV3032_PMU_TCM_0 | E_RV3032_PMU_TCM_1
+};
+
+void rv3032_initStruct(RV3032_t *rtc, void *ioInterface, uint8_t (*startTrans)(void*), uint8_t (*sendBytes)(void*,uint8_t,uint8_t*,uint16_t),uint8_t (*getBytes)(void*,uint8_t,uint8_t*,uint16_t),uint8_t (*endTrans)(void*), void(*wait1ms)(void));
 
 uint8_t rv3032_init(RV3032_t *rtc);
 
@@ -181,7 +227,15 @@ enum RV3032_ERROR rv3032_getTime(RV3032_t *rtc, RV3032_TIME_t *time);
 
 float rv3032_getTemperature(RV3032_t *rtc);
 
-void rv3032_configureClockOut(RV3032_t *rtc, enum RV3032_CLKOUT clockOut, uint16_t hfClock_steps, enum RV3032_EEPROM_OPTION eeOption);
+void rv3032_writeEEPROM(RV3032_t *rtc, uint8_t eeprom_addr, uint8_t eeprom_val);
+
+uint8_t rv3032_readEEPROM(RV3032_t *rtc, uint8_t eeprom_addr);
+
+enum RV3032_ERROR rv3032_configureClockOut(RV3032_t *rtc, enum RV3032_CLKOUT clockOut, uint16_t hfClock_steps);
+
+enum RV3032_ERROR rv3032_configureBSM(RV3032_t *rtc, enum RV3032_BSM bsm);
+
+enum RV3032_ERROR rv3032_configureTrickleCharge(RV3032_t *rtc, enum RV3032_TCR tcr, enum RV3032_TCM tcm);
 
 /* _RTC_RV3032_H_ */
 #endif

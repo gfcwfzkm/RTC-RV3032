@@ -14,13 +14,14 @@ static uint8_t bin2bcd(uint8_t val)
 	return ((val / 10) << 4) | (val % 10);
 }
 
-void rv3032_initStruct(RV3032_t *rtc, void *ioInterface, uint8_t (*startTrans)(void*), uint8_t (*sendBytes)(void*,uint8_t,uint8_t*,uint16_t),uint8_t (*getBytes)(void*,uint8_t,uint8_t*,uint16_t),uint8_t (*endTrans)(void*))
+void rv3032_initStruct(RV3032_t *rtc, void *ioInterface, uint8_t (*startTrans)(void*), uint8_t (*sendBytes)(void*,uint8_t,uint8_t*,uint16_t),uint8_t (*getBytes)(void*,uint8_t,uint8_t*,uint16_t),uint8_t (*endTrans)(void*), void (*wait1ms)(void))
 {
 	rtc->ioInterface = ioInterface;
 	rtc->startTransaction = startTrans;
 	rtc->sendBytes = sendBytes;
 	rtc->getBytes = getBytes;
 	rtc->endTransaction = endTrans;
+	rtc->wait1ms = wait1ms;
 	rtc->errors = RV3032_NO_ERRORS;
 }
 
@@ -36,10 +37,9 @@ uint8_t rv3032_init(RV3032_t *rtc)
 void rv3032_writeReg(RV3032_t *rtc, uint8_t reg_addr, uint8_t reg_val)
 {
 	uint8_t dataPackage[2] = {reg_addr, reg_val};
-	rtc->errors = RV3032_NO_ERRORS;
 
 	rtc->startTransaction(rtc->ioInterface);
-	rtc->errors = rtc->sendBytes(rtc->ioInterface, RV3032_ADDRESS, dataPackage, 2);
+	rtc->errors |= rtc->sendBytes(rtc->ioInterface, RV3032_ADDRESS, dataPackage, 2);
 	rtc->endTransaction(rtc->ioInterface);
 }
 
@@ -47,8 +47,6 @@ extern TWI_Master_t twim;
 uint8_t rv3032_readReg(RV3032_t *rtc, uint8_t reg_addr)
 {
 	uint8_t dataPackage = reg_addr;
-
-	rtc->errors = RV3032_NO_ERRORS;
 
 	rtc->startTransaction(rtc->ioInterface);
 
@@ -141,34 +139,142 @@ float rv3032_getTemperature(RV3032_t *rtc)
 	return temp_celsius;
 }
 
-void rv3032_configureClockOut(RV3032_t *rtc, enum RV3032_CLKOUT clockOut, uint16_t hfClock_steps, enum RV3032_EEPROM_OPTION eeOption)
+void rv3032_writeEEPROM(RV3032_t *rtc, uint8_t eeprom_addr, uint8_t eeprom_val)
 {
-	uint8_t dataPackage;
-
+	uint8_t autoRefreshReg;
 	rtc->errors = RV3032_NO_ERRORS;
 
-	switch(clockOut)
+	/* Check if the eeprom is busy first */
+	rv3032_writeReg(rtc, R_RV3032_TEMPERATURE_L, 0);
+	while(rv3032_readReg(rtc, R_RV3032_TEMPERATURE_L) & R_RV3032_TEMPERATURE_L_EEBUSY)
 	{
-		case RV3032_DISABLE_CLKOUT:
-
-			break;
-		case RV3032_XTAL_32KHZ_OUT:
-
-			break;
-		case RV3032_XTAL_1024HZ_OUT:
-
-			break;
-		case RV3032_XTAL_64HZ_OUT:
-
-			break;
-		case RV3032_XTAL_1HZ_OUT:
-
-			break;
-		case RV3032_HF_MODE:
-
-			break;
-		default:
-
-			break;
+		rtc->wait1ms();
 	}
+
+	/* Disable eeprom auto read, if enabled */
+	autoRefreshReg = rv3032_readReg(rtc, R_RV3032_CONTROL_1);
+	if (autoRefreshReg & R_RV3032_CONTROL_1_EERD)
+	{
+		rv3032_writeReg(rtc, R_RV3032_CONTROL_1, autoRefreshReg & ~R_RV3032_CONTROL_1_EERD);
+	}
+
+
+	rv3032_writeReg(rtc, R_RV3032_EE_ADDRESS, eeprom_addr);
+	rv3032_writeReg(rtc, R_RV3032_EE_DATA, eeprom_val);
+	rv3032_writeReg(rtc, R_RV3032_EE_COMMAND, R_RV3032_EE_COMMAND_WRITE);
+
+	/* Re-enable eeprom auto read, if it was previousely enabled */
+	if (autoRefreshReg & R_RV3032_CONTROL_1_EERD)
+	{
+		rv3032_writeReg(rtc, R_RV3032_CONTROL_1, autoRefreshReg);
+	}
+}
+
+uint8_t rv3032_readEEPROM(RV3032_t *rtc, uint8_t eeprom_addr)
+{
+	uint8_t eeprom_val, autoRefreshReg;
+	rtc->errors = RV3032_NO_ERRORS;
+
+	/* Check if the eeprom is busy first */
+	rv3032_writeReg(rtc, R_RV3032_TEMPERATURE_L, 0);
+	while(rv3032_readReg(rtc, R_RV3032_TEMPERATURE_L) & R_RV3032_TEMPERATURE_L_EEBUSY)
+	{
+		rtc->wait1ms();
+	}
+
+	/* Disable eeprom auto read, if enabled */
+	autoRefreshReg = rv3032_readReg(rtc, R_RV3032_CONTROL_1);
+	if (autoRefreshReg & R_RV3032_CONTROL_1_EERD)
+	{
+		rv3032_writeReg(rtc, R_RV3032_CONTROL_1, autoRefreshReg & ~R_RV3032_CONTROL_1_EERD);
+	}
+
+	rv3032_writeReg(rtc, R_RV3032_EE_ADDRESS, eeprom_addr);
+	rv3032_writeReg(rtc, R_RV3032_EE_COMMAND, R_RV3032_EE_COMMAND_READ);
+
+	rv3032_writeReg(rtc, R_RV3032_TEMPERATURE_L, 0);
+	while(rv3032_readReg(rtc, R_RV3032_TEMPERATURE_L) & R_RV3032_TEMPERATURE_L_EEBUSY)
+	{
+		rtc->wait1ms();
+	}
+
+	eeprom_val = rv3032_readReg(rtc, R_RV3032_EE_DATA);
+
+	/* Re-enable eeprom auto read, if it was previousely enabled */
+	if (autoRefreshReg & R_RV3032_CONTROL_1_EERD)
+	{
+		rv3032_writeReg(rtc, R_RV3032_CONTROL_1, autoRefreshReg);
+	}
+
+	return eeprom_val;
+}
+
+enum RV3032_ERROR rv3032_configureClockOut(RV3032_t *rtc, enum RV3032_CLKOUT clockOut, uint16_t hfClock_steps)
+{
+	enum RV3032_ERROR _error = RV3032_NO_ERRORS;
+	uint8_t regVal;
+	rtc->errors = RV3032_NO_ERRORS;
+	
+	regVal = rv3032_readReg(rtc, E_RV3032_PMU) & ~E_RV3032_PMU_NCLKE;
+	if (clockOut != RV3032_DISABLE_CLKOUT)
+	{
+		if (clockOut == RV3032_HF_MODE)
+		{
+			rv3032_writeEEPROM(rtc, E_RV3032_CLKOUT1, hfClock_steps);
+			_error |= rtc->errors;
+			rv3032_writeReg(rtc, E_RV3032_CLKOUT1, hfClock_steps);
+			rv3032_writeEEPROM(rtc, E_RV3032_CLKOUT2, RV3032_HF_MODE | ((hfClock_steps >> 8) & 0x1F));
+			_error |= rtc->errors;
+			rv3032_writeReg(rtc, E_RV3032_CLKOUT2, RV3032_HF_MODE | ((hfClock_steps >> 8) & 0x1F));
+		}
+		else
+		{
+			rv3032_writeEEPROM(rtc, E_RV3032_CLKOUT2, clockOut);
+			_error |= rtc->errors;
+			rv3032_writeReg(rtc, E_RV3032_CLKOUT2, clockOut);
+		}
+
+		/* Enable ClockOut */
+		regVal |= E_RV3032_PMU_NCLKE;
+	}
+	rv3032_writeEEPROM(rtc, E_RV3032_PMU, regVal);
+	_error |= rtc->errors;
+	rv3032_writeReg(rtc, E_RV3032_PMU, regVal);
+
+	rtc->errors |= _error;
+	return _error;	
+}
+
+enum RV3032_ERROR rv3032_configureBSM(RV3032_t *rtc, enum RV3032_BSM bsm)
+{
+	enum RV3032_ERROR _error;
+	uint8_t regVal;
+
+	regVal = rv3032_readReg(rtc, E_RV3032_PMU) & ~(E_RV3032_PMU_BSM_1 | E_RV3032_PMU_BSM_1);
+
+	_error = rtc->errors;
+	regVal |= bsm;
+
+	rv3032_writeEEPROM(rtc, E_RV3032_PMU, regVal);
+	rv3032_writeReg(rtc, E_RV3032_PMU, regVal);
+
+	rtc->errors |= _error;
+	return rtc->errors;
+}
+
+enum RV3032_ERROR rv3032_configureTrickleCharge(RV3032_t *rtc, enum RV3032_TCR tcr, enum RV3032_TCM tcm)
+{
+	enum RV3032_ERROR _error;
+	uint8_t regVal;
+
+	regVal = rv3032_readReg(rtc, E_RV3032_PMU) & (E_RV3032_PMU_NCLKE | E_RV3032_PMU_BSM_1 | E_RV3032_PMU_BSM_1);
+
+	_error = rtc->errors;
+	regVal |= tcr | tcm;
+
+	rv3032_writeEEPROM(rtc, E_RV3032_PMU, regVal);
+	rv3032_writeReg(rtc, E_RV3032_PMU, regVal);
+
+	rtc->errors |= _error;
+	return rtc->errors;
 }
