@@ -43,7 +43,6 @@ void rv3032_writeReg(RV3032_t *rtc, uint8_t reg_addr, uint8_t reg_val)
 	rtc->endTransaction(rtc->ioInterface);
 }
 
-extern TWI_Master_t twim;
 uint8_t rv3032_readReg(RV3032_t *rtc, uint8_t reg_addr)
 {
 	uint8_t dataPackage = reg_addr;
@@ -135,6 +134,34 @@ float rv3032_getTemperature(RV3032_t *rtc)
 	if (dataPackage[1] & (1<<7))	calcVar |= (1<<15);
 
 	temp_celsius = (float)calcVar * 0.0625;
+
+	return temp_celsius;
+}
+
+uint32_t rv3032_getTemperatureUINT(RV3032_t *rtc)
+{
+	uint8_t dataPackage[2];
+	int16_t calcVar = 0;
+	uint32_t temp_celsius;
+
+	rtc->errors = RV3032_NO_ERRORS;
+
+	dataPackage[0] = R_RV3032_TEMPERATURE_L;
+
+	rtc->startTransaction(rtc->ioInterface);
+
+	rtc->errors |= rtc->sendBytes(rtc->ioInterface, RV3032_ADDRESS, dataPackage, 1);
+	rtc->errors |= rtc->getBytes(rtc->ioInterface, RV3032_ADDRESS, dataPackage, 2);
+
+	rtc->endTransaction(rtc->ioInterface);
+
+	if (rtc->errors != RV3032_NO_ERRORS)	return 255.0f;
+
+	calcVar = ((dataPackage[1] & 0x7F) << 4) | ((dataPackage[0] & 0xF0) >> 4);
+
+	if (dataPackage[1] & (1<<7))	calcVar |= (1<<15);
+
+	temp_celsius = (uint32_t)calcVar * 625;
 
 	return temp_celsius;
 }

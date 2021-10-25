@@ -225,7 +225,9 @@ enum RV3032_ERROR rv3032_setTime(RV3032_t *rtc, RV3032_TIME_t *time);
 
 enum RV3032_ERROR rv3032_getTime(RV3032_t *rtc, RV3032_TIME_t *time);
 
-float rv3032_getTemperature(RV3032_t *rtc);
+float rv3032_getTemperatureFLOAT(RV3032_t *rtc);
+
+uint32_t rv3032_getTemperatureUINT(RV3032_t *rtc);
 
 void rv3032_writeEEPROM(RV3032_t *rtc, uint8_t eeprom_addr, uint8_t eeprom_val);
 
