@@ -110,7 +110,7 @@ enum RV3032_ERROR rv3032_getTime(RV3032_t *rtc, RV3032_TIME_t *time)
 	return rtc->errors;
 }
 
-float rv3032_getTemperature(RV3032_t *rtc)
+float rv3032_getTemperatureFLOAT(RV3032_t *rtc)
 {
 	uint8_t dataPackage[2];
 	int16_t calcVar = 0;
@@ -166,72 +166,75 @@ uint32_t rv3032_getTemperatureUINT(RV3032_t *rtc)
 	return temp_celsius;
 }
 
-void rv3032_writeEEPROM(RV3032_t *rtc, uint8_t eeprom_addr, uint8_t eeprom_val)
+/* Waits until the EEPROM is not busy anymore (max. ~50 ms). Returns non-zero on timeout / IO error */
+static uint8_t _eeWaitReady(RV3032_t *rtc)
 {
-	uint8_t autoRefreshReg;
-	rtc->errors = RV3032_NO_ERRORS;
-
-	/* Check if the eeprom is busy first */
-	rv3032_writeReg(rtc, R_RV3032_TEMPERATURE_L, 0);
-	while(rv3032_readReg(rtc, R_RV3032_TEMPERATURE_L) & R_RV3032_TEMPERATURE_L_EEBUSY)
+	for (uint8_t i = 0; i < 50; i++)
 	{
+		uint8_t tempL = rv3032_readReg(rtc, R_RV3032_TEMPERATURE_L);
+		if (rtc->errors)	return 1;
+		if (!(tempL & R_RV3032_TEMPERATURE_L_EEBUSY))	return 0;
 		rtc->wait1ms();
 	}
+	return 1;
+}
 
-	/* Disable eeprom auto read, if enabled */
-	autoRefreshReg = rv3032_readReg(rtc, R_RV3032_CONTROL_1);
-	if (autoRefreshReg & R_RV3032_CONTROL_1_EERD)
-	{
-		rv3032_writeReg(rtc, R_RV3032_CONTROL_1, autoRefreshReg & ~R_RV3032_CONTROL_1_EERD);
-	}
+/* Disables the automatic EEPROM refresh (EERD = 1), required before any EEPROM command.
+ * Returns the previous CONTROL_1 value to restore it afterwards. */
+static uint8_t _eeBegin(RV3032_t *rtc)
+{
+	uint8_t ctrl1 = rv3032_readReg(rtc, R_RV3032_CONTROL_1);
+	rv3032_writeReg(rtc, R_RV3032_CONTROL_1, ctrl1 | R_RV3032_CONTROL_1_EERD);
+	if (_eeWaitReady(rtc))	rtc->errors |= RV3032_EEPROM_ERROR;
+	return ctrl1;
+}
 
+static void _eeEnd(RV3032_t *rtc, uint8_t ctrl1)
+{
+	rv3032_writeReg(rtc, R_RV3032_CONTROL_1, ctrl1);
+}
+
+void rv3032_writeEEPROM(RV3032_t *rtc, uint8_t eeprom_addr, uint8_t eeprom_val)
+{
+	uint8_t ctrl1;
+
+	rtc->errors = RV3032_NO_ERRORS;
+
+	/* Clear the EEPROM failure flag (EEF) */
+	rv3032_writeReg(rtc, R_RV3032_TEMPERATURE_L, 0);
+
+	ctrl1 = _eeBegin(rtc);
 
 	rv3032_writeReg(rtc, R_RV3032_EE_ADDRESS, eeprom_addr);
 	rv3032_writeReg(rtc, R_RV3032_EE_DATA, eeprom_val);
 	rv3032_writeReg(rtc, R_RV3032_EE_COMMAND, R_RV3032_EE_COMMAND_WRITE);
 
-	/* Re-enable eeprom auto read, if it was previousely enabled */
-	if (autoRefreshReg & R_RV3032_CONTROL_1_EERD)
+	/* The write takes a few milliseconds - wait for it before re-enabling the refresh */
+	if (_eeWaitReady(rtc))	rtc->errors |= RV3032_EEPROM_ERROR;
+	if (rv3032_readReg(rtc, R_RV3032_TEMPERATURE_L) & R_RV3032_TEMPERATURE_L_EEF)
 	{
-		rv3032_writeReg(rtc, R_RV3032_CONTROL_1, autoRefreshReg);
+		rtc->errors |= RV3032_EEPROM_ERROR;
 	}
+
+	_eeEnd(rtc, ctrl1);
 }
 
 uint8_t rv3032_readEEPROM(RV3032_t *rtc, uint8_t eeprom_addr)
 {
-	uint8_t eeprom_val, autoRefreshReg;
+	uint8_t eeprom_val, ctrl1;
+
 	rtc->errors = RV3032_NO_ERRORS;
 
-	/* Check if the eeprom is busy first */
-	rv3032_writeReg(rtc, R_RV3032_TEMPERATURE_L, 0);
-	while(rv3032_readReg(rtc, R_RV3032_TEMPERATURE_L) & R_RV3032_TEMPERATURE_L_EEBUSY)
-	{
-		rtc->wait1ms();
-	}
-
-	/* Disable eeprom auto read, if enabled */
-	autoRefreshReg = rv3032_readReg(rtc, R_RV3032_CONTROL_1);
-	if (autoRefreshReg & R_RV3032_CONTROL_1_EERD)
-	{
-		rv3032_writeReg(rtc, R_RV3032_CONTROL_1, autoRefreshReg & ~R_RV3032_CONTROL_1_EERD);
-	}
+	ctrl1 = _eeBegin(rtc);
 
 	rv3032_writeReg(rtc, R_RV3032_EE_ADDRESS, eeprom_addr);
 	rv3032_writeReg(rtc, R_RV3032_EE_COMMAND, R_RV3032_EE_COMMAND_READ);
 
-	rv3032_writeReg(rtc, R_RV3032_TEMPERATURE_L, 0);
-	while(rv3032_readReg(rtc, R_RV3032_TEMPERATURE_L) & R_RV3032_TEMPERATURE_L_EEBUSY)
-	{
-		rtc->wait1ms();
-	}
+	if (_eeWaitReady(rtc))	rtc->errors |= RV3032_EEPROM_ERROR;
 
 	eeprom_val = rv3032_readReg(rtc, R_RV3032_EE_DATA);
 
-	/* Re-enable eeprom auto read, if it was previousely enabled */
-	if (autoRefreshReg & R_RV3032_CONTROL_1_EERD)
-	{
-		rv3032_writeReg(rtc, R_RV3032_CONTROL_1, autoRefreshReg);
-	}
+	_eeEnd(rtc, ctrl1);
 
 	return eeprom_val;
 }
@@ -277,7 +280,7 @@ enum RV3032_ERROR rv3032_configureBSM(RV3032_t *rtc, enum RV3032_BSM bsm)
 	enum RV3032_ERROR _error;
 	uint8_t regVal;
 
-	regVal = rv3032_readReg(rtc, E_RV3032_PMU) & ~(E_RV3032_PMU_BSM_1 | E_RV3032_PMU_BSM_1);
+	regVal = rv3032_readReg(rtc, E_RV3032_PMU) & ~(E_RV3032_PMU_BSM_1 | E_RV3032_PMU_BSM_0);
 
 	_error = rtc->errors;
 	regVal |= bsm;
@@ -294,7 +297,7 @@ enum RV3032_ERROR rv3032_configureTrickleCharge(RV3032_t *rtc, enum RV3032_TCR t
 	enum RV3032_ERROR _error;
 	uint8_t regVal;
 
-	regVal = rv3032_readReg(rtc, E_RV3032_PMU) & (E_RV3032_PMU_NCLKE | E_RV3032_PMU_BSM_1 | E_RV3032_PMU_BSM_1);
+	regVal = rv3032_readReg(rtc, E_RV3032_PMU) & (E_RV3032_PMU_NCLKE | E_RV3032_PMU_BSM_1 | E_RV3032_PMU_BSM_0);
 
 	_error = rtc->errors;
 	regVal |= tcr | tcm;
